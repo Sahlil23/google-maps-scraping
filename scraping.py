@@ -22,7 +22,7 @@ try:
     driver.get(url)
     time.sleep(5)
 
-    # Tunggu halaman load dan klik tab Reviews
+    
     print("Mencari tab Reviews...")
     try:
         review_tab_selectors = [
