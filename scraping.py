@@ -9,7 +9,6 @@ import time
 import pandas as pd
 import re
 
-# Setup driver
 service = Service()
 options = webdriver.ChromeOptions()
 options.add_argument("--no-sandbox")
@@ -20,9 +19,12 @@ url = "https://www.google.com/maps/place/Pantai+BATAKAN+BARU/@-4.0243589,114.654
 
 try:
     driver.get(url)
-    time.sleep(5)
+    lanjut = input("Lanjutkan proses scraping? (y/n): ")
+    if lanjut.lower() != "y":
+        print("Proses scraping dibatalkan oleh user.")
+        driver.quit()
+        exit()
 
-    
     print("Mencari tab Reviews...")
     try:
         review_tab_selectors = [
@@ -52,24 +54,71 @@ try:
     except Exception as e:
         print(f"Error saat mencari tab reviews: {e}")
 
-    # Scroll untuk memuat ulasan
-    print("Memuat ulasan dengan scroll...")
-    last_height = driver.execute_script("return document.body.scrollHeight")
+    # PERBAIKAN: Scroll di dalam container ulasan yang spesifik
+    print("Memuat ulasan dengan scroll di container...")
     
-    for i in range(30):
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
+    # Cari container ulasan yang bisa di-scroll
+    scrollable_container = None
+    container_selectors = [
+        "div[role='main']",
+        "div.m6QErb",
+        "div.review-dialog-list",
+        ".m6QErb[role='main']",
+        "div[data-value='Reviews'] + div",
+        "div.section-scrollbox"
+    ]
+    
+    for selector in container_selectors:
+        try:
+            container = driver.find_element(By.CSS_SELECTOR, selector)
+            if container:
+                scrollable_container = container
+                print(f"Menggunakan container: {selector}")
+                break
+        except:
+            continue
+    
+    if scrollable_container:
+        # Scroll di dalam container ulasan
+        last_scroll_height = 0
+        scroll_attempts = 0
+        max_scrolls = 100  # Batasi maksimal scroll
         
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            break
-        last_height = new_height
-        print(f"Scroll ke-{i+1}")
+        while scroll_attempts < max_scrolls:
+            # Scroll ke bawah dalam container
+            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_container)
+            time.sleep(3)  # Beri waktu lebih lama untuk loading
+            
+            # Cek apakah ada konten baru yang dimuat
+            new_scroll_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_container)
+            
+            if new_scroll_height == last_scroll_height:
+                # Tidak ada konten baru, coba scroll lagi beberapa kali
+                scroll_attempts += 1
+                print(f"Tidak ada konten baru, percobaan ke-{scroll_attempts}")
+                
+                # Jika sudah 3 kali tidak ada konten baru, berhenti
+                if scroll_attempts >= 5:
+                    break
+            else:
+                # Ada konten baru, reset counter
+                scroll_attempts = 0
+                last_scroll_height = new_scroll_height
+                print(f"Memuat konten baru... Height: {new_scroll_height}")
+    else:
+        print("Container ulasan tidak ditemukan, menggunakan scroll halaman biasa")
+        # Fallback ke scroll halaman biasa
+        for i in range(50):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
+            print(f"Scroll halaman ke-{i+1}")
 
-    # Cari dan klik tombol "Lainnya" untuk expand ulasan - PERBAIKAN SELECTOR
+    # Tunggu sebentar untuk memastikan semua konten dimuat
+    time.sleep(5)
+
+    # Cari dan klik tombol "Lainnya" untuk expand ulasan
     print("Mengexpand ulasan panjang...")
     try:
-        # Selector yang lebih akurat berdasarkan gambar
         more_button_selectors = [
             "//button[contains(@class, 'w8nwRe') and contains(text(), 'Lainnya')]",
             "//button[contains(@class, 'w8nwRe') and contains(text(), 'More')]",
@@ -87,11 +136,8 @@ try:
                 
                 for i, button in enumerate(more_buttons):
                     try:
-                        # Scroll ke tombol terlebih dahulu
                         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
                         time.sleep(0.5)
-                        
-                        # Klik tombol
                         driver.execute_script("arguments[0].click();", button)
                         total_expanded += 1
                         print(f"Berhasil expand ulasan ke-{total_expanded}")
@@ -137,16 +183,7 @@ try:
 
     for review in review_containers:
         try:
-            # Ekstraksi nama
-            nama = 'Anonim'
-            name_selectors = ['div.d4r55', 'div.WNxzHc', 'span.X43Kjb']
-            for sel in name_selectors:
-                name_elem = review.select_one(sel)
-                if name_elem:
-                    nama = name_elem.get_text(strip=True)
-                    break
-
-            # Ekstraksi teks ulasan - PERBAIKAN UNTUK HANDLE ENTER
+            # Ekstraksi teks ulasan
             teks = ''
             text_selectors = [
                 'span.wiI7pd',
@@ -157,41 +194,23 @@ try:
             for sel in text_selectors:
                 text_elem = review.select_one(sel)
                 if text_elem:
-                    # Ambil teks dan replace newline dengan spasi
                     teks = text_elem.get_text(separator=' ', strip=True)
-                    # Bersihkan multiple spasi
                     teks = re.sub(r'\s+', ' ', teks)
                     break
-
-            # Ekstraksi rating
-            rating = 'Tidak Tersedia'
-            rating_selectors = [
-                'span[aria-label*="star"]',
-                'span[aria-label*="Star"]',
-                'span[aria-label*="bintang"]',
-                'div[aria-label*="star"]',
-                'span.kvMYJc'
-            ]
-            for sel in rating_selectors:
-                rating_elem = review.select_one(sel)
-                if rating_elem and rating_elem.get('aria-label'):
-                    rating = rating_elem['aria-label']
-                    break
-
             # Hindari duplikat dan data kosong
-            if nama and teks:
-                review_id = f"{nama}_{hash(teks)}_{rating}"
+            if teks:
+                review_id = f"{hash(teks)}"
                 if review_id not in seen_reviews:
                     seen_reviews.add(review_id)
-                    data_list.append([nama, teks, rating])
+                    data_list.append([teks])
 
         except Exception as e:
             continue
 
-    # Simpan ke CSV dengan quoting untuk handle comma dan newline
+    # Simpan ke CSV
     if data_list:
-        df = pd.DataFrame(data_list, columns=['Nama', 'Ulasan', 'Rating'])
-        df.to_csv('ulasan_batakan.csv', index=False, encoding='utf-8', quoting=1)  # quoting=1 untuk quote semua field
+        df = pd.DataFrame(data_list, columns=['Ulasan'])
+        df.to_csv('ulasan_batakan.csv', index=False, encoding='utf-8', quoting=1)
         print(f"Berhasil mengambil {len(df)} ulasan")
         print("Data disimpan ke ulasan_batakan.csv")
     else:
