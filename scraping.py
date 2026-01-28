@@ -19,12 +19,8 @@ url = "https://www.google.com/maps/place/Pantai+BATAKAN+BARU/@-4.0243589,114.654
 
 try:
     driver.get(url)
-    lanjut = input("Lanjutkan proses scraping? (y/n): ")
-    if lanjut.lower() != "y":
-        print("Proses scraping dibatalkan oleh user.")
-        driver.quit()
-        exit()
-
+    time.sleep(5)  # Tunggu halaman load
+    
     print("Mencari tab Reviews...")
     try:
         review_tab_selectors = [
@@ -54,17 +50,15 @@ try:
     except Exception as e:
         print(f"Error saat mencari tab reviews: {e}")
 
-    # PERBAIKAN: Scroll di dalam container ulasan yang spesifik
-    print("Memuat ulasan dengan scroll di container...")
+    # PERBAIKAN: Scroll otomatis di container ulasan
+    print("Memuat SEMUA ulasan dengan scroll otomatis...")
     
     # Cari container ulasan yang bisa di-scroll
     scrollable_container = None
     container_selectors = [
+        "div.m6QErb.DxyBCb.kA9KIf.dS8AEf",  # Container utama Google Maps
         "div[role='main']",
         "div.m6QErb",
-        "div.review-dialog-list",
-        ".m6QErb[role='main']",
-        "div[data-value='Reviews'] + div",
         "div.section-scrollbox"
     ]
     
@@ -73,108 +67,98 @@ try:
             container = driver.find_element(By.CSS_SELECTOR, selector)
             if container:
                 scrollable_container = container
-                print(f"Menggunakan container: {selector}")
+                print(f"Container ditemukan: {selector}")
                 break
         except:
             continue
     
     if scrollable_container:
-        # Scroll di dalam container ulasan
-        last_scroll_height = 0
-        scroll_attempts = 0
-        max_scrolls = 100  # Batasi maksimal scroll
+        print("Mulai scroll otomatis untuk memuat semua ulasan...")
+        last_height = 0
+        no_change_count = 0
+        scroll_count = 0
+        max_no_change = 30  # Berhenti jika 3x berturut-turut tidak ada perubahan
         
-        while scroll_attempts < max_scrolls:
-            # Scroll ke bawah dalam container
-            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_container)
-            time.sleep(3)  # Beri waktu lebih lama untuk loading
+        while no_change_count < max_no_change:
+            # Scroll ke bawah
+            driver.execute_script(
+                "arguments[0].scrollTo(0, arguments[0].scrollHeight)", 
+                scrollable_container
+            )
+            scroll_count += 1
+            print(f"Scroll #{scroll_count}...", end=" ")
             
-            # Cek apakah ada konten baru yang dimuat
-            new_scroll_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_container)
+            # Tunggu loading
+            time.sleep(2)
             
-            if new_scroll_height == last_scroll_height:
-                # Tidak ada konten baru, coba scroll lagi beberapa kali
-                scroll_attempts += 1
-                print(f"Tidak ada konten baru, percobaan ke-{scroll_attempts}")
-                
-                # Jika sudah 3 kali tidak ada konten baru, berhenti
-                if scroll_attempts >= 5:
-                    break
+            # Cek tinggi baru
+            new_height = driver.execute_script(
+                "return arguments[0].scrollHeight", 
+                scrollable_container
+            )
+            
+            if new_height == last_height:
+                no_change_count += 1
+                print(f"Tidak ada perubahan ({no_change_count}/{max_no_change})")
             else:
-                # Ada konten baru, reset counter
-                scroll_attempts = 0
-                last_scroll_height = new_scroll_height
-                print(f"Memuat konten baru... Height: {new_scroll_height}")
+                no_change_count = 0
+                print(f"Memuat konten baru (Height: {new_height})")
+                last_height = new_height
+        
+        print(f"\nSelesai scroll. Total {scroll_count} kali scroll.")
+        
     else:
-        print("Container ulasan tidak ditemukan, menggunakan scroll halaman biasa")
-        # Fallback ke scroll halaman biasa
+        print("Container tidak ditemukan, menggunakan scroll halaman")
         for i in range(50):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
-            print(f"Scroll halaman ke-{i+1}")
 
-    # Tunggu sebentar untuk memastikan semua konten dimuat
-    time.sleep(5)
+    # Tunggu konten final dimuat
+    time.sleep(3)
 
-    # Cari dan klik tombol "Lainnya" untuk expand ulasan
-    print("Mengexpand ulasan panjang...")
-    try:
-        more_button_selectors = [
-            "//button[contains(@class, 'w8nwRe') and contains(text(), 'Lainnya')]",
-            "//button[contains(@class, 'w8nwRe') and contains(text(), 'More')]",
-            "//button[contains(@aria-label, 'See more')]",
-            "//button[contains(@aria-label, 'Lihat selengkapnya')]",
-            "//button[contains(text(), 'Lainnya')]",
-            "//button[contains(text(), 'More')]"
-        ]
-        
-        total_expanded = 0
-        for selector in more_button_selectors:
-            try:
-                more_buttons = driver.find_elements(By.XPATH, selector)
-                print(f"Selector {selector}: ditemukan {len(more_buttons)} tombol")
-                
-                for i, button in enumerate(more_buttons):
-                    try:
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                        time.sleep(0.5)
-                        driver.execute_script("arguments[0].click();", button)
-                        total_expanded += 1
-                        print(f"Berhasil expand ulasan ke-{total_expanded}")
-                        time.sleep(0.3)
-                    except Exception as e:
-                        continue
-                        
-            except Exception as e:
-                continue
-                
-        print(f"Total ulasan yang di-expand: {total_expanded}")
-        
-    except Exception as e:
-        print(f"Error saat expand ulasan: {e}")
-
-    # Tunggu sebentar setelah expand
+    # Expand semua tombol "Lainnya"
+    print("\nMengexpand ulasan panjang...")
+    more_button_selectors = [
+        "//button[@class='w8nwRe kyuRq' and @jsaction='pane.reviewChart.moreReviews']",
+        "//button[contains(@class, 'w8nwRe')]",
+        "//button[@aria-label='Lihat ulasan lengkap']",
+        "//button[@aria-label='See full review']"
+    ]
+    
+    total_expanded = 0
+    for selector in more_button_selectors:
+        try:
+            buttons = driver.find_elements(By.XPATH, selector)
+            for btn in buttons:
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+                    time.sleep(0.3)
+                    driver.execute_script("arguments[0].click();", btn)
+                    total_expanded += 1
+                except:
+                    continue
+        except:
+            continue
+    
+    print(f"Total {total_expanded} ulasan di-expand")
     time.sleep(2)
 
-    # Ambil source code halaman
+    # Scraping ulasan
     page_source = driver.page_source
     soup = BeautifulSoup(page_source, 'html.parser')
 
-    # Cari container ulasan dengan berbagai selector
     review_containers = []
-    
     selectors = [
+        'div.jftiEf.fontBodyMedium',
         'div[data-review-id]',
-        'div.jftiEf',
-        'div.fontBodyMedium',
-        'div[jsaction*="review"]'
+        'div.jftiEf'
     ]
     
     for selector in selectors:
         containers = soup.select(selector)
         if containers:
             review_containers = containers
-            print(f"Menggunakan selector: {selector}, ditemukan {len(containers)} ulasan")
+            print(f"\nDitemukan {len(containers)} ulasan dengan selector: {selector}")
             break
 
     # Extract data
@@ -183,23 +167,22 @@ try:
 
     for review in review_containers:
         try:
-            # Ekstraksi teks ulasan
             teks = ''
             text_selectors = [
                 'span.wiI7pd',
-                'span[jsaction*="expand"]',
                 'div.MyEned span',
-                'span.review-full-text'
+                'span[class*="review"]'
             ]
+            
             for sel in text_selectors:
                 text_elem = review.select_one(sel)
                 if text_elem:
                     teks = text_elem.get_text(separator=' ', strip=True)
                     teks = re.sub(r'\s+', ' ', teks)
                     break
-            # Hindari duplikat dan data kosong
-            if teks:
-                review_id = f"{hash(teks)}"
+            
+            if teks and len(teks) > 5:  # Filter ulasan minimal 5 karakter
+                review_id = hash(teks)
                 if review_id not in seen_reviews:
                     seen_reviews.add(review_id)
                     data_list.append([teks])
@@ -210,14 +193,16 @@ try:
     # Simpan ke CSV
     if data_list:
         df = pd.DataFrame(data_list, columns=['Ulasan'])
-        df.to_csv('ulasan_batakan.csv', index=False, encoding='utf-8', quoting=1)
-        print(f"Berhasil mengambil {len(df)} ulasan")
-        print("Data disimpan ke ulasan_batakan.csv")
+        df.to_csv('ulasan_batakan.csv', index=False, encoding='utf-8-sig')
+        print(f"\n✓ Berhasil mengambil {len(df)} ulasan unik")
+        print("✓ Data disimpan ke ulasan_batakan.csv")
     else:
-        print("Tidak ada data ulasan yang berhasil diambil")
+        print("\n✗ Tidak ada data ulasan yang berhasil diambil")
 
 except Exception as e:
-    print(f"Error: {e}")
+    print(f"\n✗ Error: {e}")
+    import traceback
+    traceback.print_exc()
 
 finally:
     driver.quit()
