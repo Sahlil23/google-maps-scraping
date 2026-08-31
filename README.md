@@ -90,3 +90,4 @@ Jika hasil kosong / sedikit:
 
 ## Lisensi
 Hanya untuk penggunaan internal / edukasi (sesuaikan kebutuhan Anda).
+
